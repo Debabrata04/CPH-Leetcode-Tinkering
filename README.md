@@ -23,9 +23,7 @@ A Visual Studio Code plugin designed to simplify testing LeetCode problems direc
 5. The test cases will be fetched automatically and prepared for use.
 6. Implement your solution and execute tests using the CPH Test Runner.
 
+## Requirements
 - VS Code 1.96.0 or higher
 - Node.js 22.10.0 or higher
-- Active internet connection for fetching test cases
 
-
-~ Made with ❤️ for competitive programmers
