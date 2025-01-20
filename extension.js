@@ -1,14 +1,14 @@
-const vscode = require('vscode');
-const axios = require('axios');
-const fs = require('fs').promises;
-const path = require('path');
-const cheerio = require('cheerio');
-const { formatArrayToString, splitTestCases } = require('./src/utils/formatters');
-const { executeCode, runSingle } = require('./src/utils/codeExec');
+const vsEditor = require('vscode');
+const httpClient = require('axios');
+const fileSystem = require('fs').promises;
+const filePath = require('path');
+const domParser = require('cheerio');
+const { formatArray, splitCases } = require('./src/utils/formatters');
+const { runCode, executeSingleTest } = require('./src/utils/codeExec');
 
 // GraphQL query for problem details
-const QUESTION_QUERY = `
-query questionData($titleSlug: String!) {
+const QUERY_PROBLEM_DETAILS = `
+query problemDetails($titleSlug: String!) {
     question(titleSlug: $titleSlug) {
         questionId
         title
@@ -18,175 +18,170 @@ query questionData($titleSlug: String!) {
     }
 }`;
 
-function extractTestCases(content, exampleTestcases, sampleTestCase){
-    if (!content) return { inputs: [], outputs: [] };
-    
-    const $ = cheerio.load(content);
+function parseTestCases(htmlContent, exampleCases, sampleCase) {
+    if (!htmlContent) return { inputs: [], outputs: [] };
+
+    const $ = domParser.load(htmlContent);
     const outputs = [];
-    
-    // Number of lines per test case
-    const linesPerCase = sampleTestCase ? 
-        (sampleTestCase.match(/\n/g) || []).length + 1 : 1;
-    
-    const inputs = exampleTestcases ? 
-        splitTestCases(exampleTestcases, linesPerCase) : [];
-    
-    // Extract outputs from HTML content
-    $('strong.example').each((i, element) => {
-        let output = '';
-        let currentElement = $(element);
-        
-        while (currentElement.length) {
-            if (currentElement.next().length) {
-                currentElement = currentElement.next();
-            } else if (currentElement.parent().next().length) {
-                currentElement = currentElement.parent().next();
+
+    const linesPerExample = sampleCase ? 
+        (sampleCase.match(/\n/g) || []).length + 1 : 1;
+
+    const inputs = exampleCases ? 
+        splitCases(exampleCases, linesPerExample) : [];
+
+    $('strong.example').each((index, elem) => {
+        let outputText = '';
+        let currentElem = $(elem);
+
+        while (currentElem.length) {
+            if (currentElem.next().length) {
+                currentElem = currentElem.next();
+            } else if (currentElem.parent().next().length) {
+                currentElem = currentElem.parent().next();
             } else {
                 break;
             }
-            
-            const preElement = currentElement.is('pre') ? 
-                currentElement : currentElement.find('pre');
-            
-            if (preElement.length) {
-                const testCaseText = preElement.text();
-                const outputMatch = testCaseText.match(/Output:\s*([^]*?)(?=\nExplanation:|$)/);
+
+            const codeBlock = currentElem.is('pre') ? 
+                currentElem : currentElem.find('pre');
+
+            if (codeBlock.length) {
+                const textContent = codeBlock.text();
+                const outputMatch = textContent.match(/Output:\s*([^]*?)(?=\nExplanation:|$)/);
                 if (outputMatch && outputMatch[1]) {
-                    output = formatArrayToString(outputMatch[1].trim());
+                    outputText = formatArray(outputMatch[1].trim());
                     break;
                 }
             }
         }
-        outputs.push(output || '');
+        outputs.push(outputText || '');
     });
-    
+
     return {
         inputs: inputs.map(input => 
             input.split('\n')
-                .map(line => formatArrayToString(line))
+                .map(line => formatArray(line))
                 .join('\n')
         ),
         outputs: outputs.map(output => 
             output.split('\n')
-                .map(line => formatArrayToString(line))
+                .map(line => formatArray(line))
                 .join('\n')
         )
     };
 }
 
-async function saveTestCases(workspaceRoot, problemId, testcases) {
-    const testCaseDir = path.join(workspaceRoot, '.leetcode', 'testcases', problemId);
-    
+async function storeTestCases(projectRoot, problemId, testCases) {
+    const testCasesFolder = filePath.join(projectRoot, '.leetcode', 'cases', problemId);
+
     try {
-        await fs.mkdir(testCaseDir, { recursive: true });
-        
-        // Save input test cases
-        for (let i = 0; i < testcases.inputs.length; i++) {
-            const inputPath = path.join(testCaseDir, `input_${i + 1}.txt`);
-            const formattedInput = Array.isArray(testcases.inputs[i]) ? 
-                testcases.inputs[i].join('\n') : 
-                testcases.inputs[i];
-            await fs.writeFile(inputPath, formattedInput);
+        await fileSystem.mkdir(testCasesFolder, { recursive: true });
+
+        for (let i = 0; i < testCases.inputs.length; i++) {
+            const inputFile = filePath.join(testCasesFolder, `input_${i + 1}.txt`);
+            const formattedInput = Array.isArray(testCases.inputs[i]) ? 
+                testCases.inputs[i].join('\n') : 
+                testCases.inputs[i];
+            await fileSystem.writeFile(inputFile, formattedInput);
         }
-        
-        // Save output test cases
-        for (let i = 0; i < testcases.outputs.length; i++) {
-            const outputPath = path.join(testCaseDir, `output_${i + 1}.txt`);
-            await fs.writeFile(outputPath, testcases.outputs[i]);
+
+        for (let i = 0; i < testCases.outputs.length; i++) {
+            const outputFile = filePath.join(testCasesFolder, `output_${i + 1}.txt`);
+            await fileSystem.writeFile(outputFile, testCases.outputs[i]);
         }
-        
-        return testCaseDir;
-    } catch (error) {
-        throw new Error(`Failed to save test cases: ${error.message}`);
+
+        return testCasesFolder;
+    } catch (err) {
+        throw new Error(`Error storing test cases: ${err.message}`);
     }
 }
 
-async function fetchTestCases(titleSlug) {
+async function retrieveTestCases(slugTitle) {
     try {
-        const response = await axios.post(
+        const res = await httpClient.post(
             'https://leetcode.com/graphql',
             {
-                query: QUESTION_QUERY,
-                variables: { titleSlug }
+                query: QUERY_PROBLEM_DETAILS,
+                variables: { titleSlug: slugTitle }
             }
         );
 
-        if (response.data.errors) {
-            throw new Error(response.data.errors[0].message);
+        if (res.data.errors) {
+            throw new Error(res.data.errors[0].message);
         }
 
-        const problem = response.data.data.question;
+        const problemData = res.data.data.question;
         return {
-            id: problem.questionId,
-            content: problem.content,
-            testcases: extractTestCases(
-                problem.content,
-                problem.exampleTestcases,
-                problem.sampleTestCase
+            id: problemData.questionId,
+            content: problemData.content,
+            testcases: parseTestCases(
+                problemData.content,
+                problemData.exampleTestcases,
+                problemData.sampleTestCase
             )
         };
-    } catch (error) {
-        throw new Error(`LeetCode API Error: ${error.message}`);
+    } catch (err) {
+        throw new Error(`Error fetching from LeetCode: ${err.message}`);
     }
 }
 
-// Define the WebviewProvider class properly
-class WebviewProvider {
+class ProblemViewProvider {
     constructor() {
-        this.webview = null;
-        this.currentFile = null;
-        this.currentLanguage = null;
+        this.activeWebview = null;
+        this.openFile = null;
+        this.openLanguage = null;
     }
 
-    setCurrentFile(filePath, language) {
-        this.currentFile = filePath;
-        this.currentLanguage = language;
+    setActiveFile(filePath, language) {
+        this.openFile = filePath;
+        this.openLanguage = language;
     }
 
-    resolveWebviewView(webviewView) {
-        this.webview = webviewView.webview;
-        const { getWebviewContent } = require('./src/webview/home');
-        
-        webviewView.webview.options = {
+    resolveWebview(webviewPanel) {
+        this.activeWebview = webviewPanel.webview;
+        const { generateWebviewContent } = require('./src/webview/home');
+
+        webviewPanel.webview.options = {
             enableScripts: true
         };
 
-        webviewView.webview.html = getWebviewContent();
+        webviewPanel.webview.html = generateWebviewContent();
 
-        webviewView.webview.onDidReceiveMessage(async message => {
-            switch (message.command) {
+        webviewPanel.webview.onDidReceiveMessage(async msg => {
+            switch (msg.command) {
                 case 'fetch':
-                    vscode.commands.executeCommand('leetcode-testcases.fetch', message.url);
+                    vsEditor.commands.executeCommand('leetcode-cases.fetch', msg.url);
                     break;
                 case 'runSingle':
                     try {
-                        if (!this.currentFile || !this.currentLanguage) {
-                            throw new Error('No active file selected');
+                        if (!this.openFile || !this.openLanguage) {
+                            throw new Error('No file selected');
                         }
 
-                        const result = await runSingle(
-                            this.currentFile,
-                            this.currentLanguage,
-                            message.testCase.input,
-                            message.testCase.expectedOutput
+                        const result = await executeSingleTest(
+                            this.openFile,
+                            this.openLanguage,
+                            msg.testCase.input,
+                            msg.testCase.expectedOutput
                         );
 
                         if (!result.success) {
                             throw new Error(result.error);
                         }
 
-                        webviewView.webview.postMessage({
+                        webviewPanel.webview.postMessage({
                             command: 'testCaseResult',
-                            index: message.testCase.index,
+                            index: msg.testCase.index,
                             passed: result.passed,
                             actualOutput: result.actualOutput
                         });
-                    } catch (error) {
-                        webviewView.webview.postMessage({
+                    } catch (err) {
+                        webviewPanel.webview.postMessage({
                             command: 'testCaseResult',
-                            index: message.testCase.index,
+                            index: msg.testCase.index,
                             passed: false,
-                            actualOutput: error.message
+                            actualOutput: err.message
                         });
                     }
                     break;
@@ -195,26 +190,24 @@ class WebviewProvider {
     }
 }
 
-// Extract titleSlug from URL
-const getTitleSlug = (url) => {
+const extractSlugFromUrl = (url) => {
     try {
-        const cleanUrl = url.replace(/\/$/, '');
-        const match = cleanUrl.match(/\/problems\/([^/]+)/); 
-        if (!match || !match[1]) throw new Error('Invalid LeetCode URL');
-        return match[1];
-    } catch (error) {
-        throw new Error('Invalid LeetCode URL format');
+        const sanitizedUrl = url.replace(/\/$/, '');
+        const matchResult = sanitizedUrl.match(/\/problems\/([^/]+)/); 
+        if (!matchResult || !matchResult[1]) throw new Error('Invalid URL');
+        return matchResult[1];
+    } catch (err) {
+        throw new Error('Malformed URL format');
     }
 };
 
-function activate(context) {
+function activatePlugin(context) {
+    const viewProvider = new ProblemViewProvider();
 
-	const provider = new WebviewProvider();
-	// Register the WebView Provider
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(
-            'leetcode-testcases.webview',
-            provider,
+        vsEditor.window.registerWebviewViewProvider(
+            'leetcode-cases.webview',
+            viewProvider,
             {
                 webviewOptions: {
                     retainContextWhenHidden: true
@@ -222,32 +215,30 @@ function activate(context) {
             }
         )
     );
-    // Update provider when active editor changes
-    vscode.window.onDidChangeActiveTextEditor(editor => {
+
+    vsEditor.window.onDidChangeActiveTextEditor(editor => {
         if (editor) {
-            const document = editor.document;
-            const language = document.languageId;
-            provider.setCurrentFile(document.uri.fsPath, language);
+            const doc = editor.document;
+            const lang = doc.languageId;
+            viewProvider.setActiveFile(doc.uri.fsPath, lang);
         }
     });
 
-    // Set initial file if there's an active editor
-    if (vscode.window.activeTextEditor) {
-        const document = vscode.window.activeTextEditor.document;
-        const language = document.languageId;
-        provider.setCurrentFile(document.uri.fsPath, language);
+    if (vsEditor.window.activeTextEditor) {
+        const doc = vsEditor.window.activeTextEditor.document;
+        const lang = doc.languageId;
+        viewProvider.setActiveFile(doc.uri.fsPath, lang);
     }
-    // Register fetch command
-    let fetchCommand = vscode.commands.registerCommand('leetcode-testcases.fetch', async (problemUrl) => {
+
+    let fetchCmd = vsEditor.commands.registerCommand('leetcode-cases.fetch', async (problemUrl) => {
         try {
-            
-            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (!workspaceRoot) {
-                throw new Error('No workspace folder found');
+            const rootDir = vsEditor.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!rootDir) {
+                throw new Error('No workspace detected');
             }
 
             if (!problemUrl) {
-                problemUrl = await vscode.window.showInputBox({
+                problemUrl = await vsEditor.window.showInputBox({
                     prompt: 'Enter LeetCode problem URL',
                     placeHolder: 'https://leetcode.com/problems/...'
                 });
@@ -257,91 +248,88 @@ function activate(context) {
                 return;
             }
 
-            const titleSlug = getTitleSlug(problemUrl);
+            const slugTitle = extractSlugFromUrl(problemUrl);
 
-            await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: "Fetching LeetCode test cases...",
+            await vsEditor.window.withProgress({
+                location: vsEditor.ProgressLocation.Notification,
+                title: "Fetching test cases...",
                 cancellable: false
-            }, async (progress) => {
-                // Fetch test cases
-                const { id, content, testcases } = await fetchTestCases(titleSlug);
-                
-                // Save test cases
-                const testCasePath = await saveTestCases(workspaceRoot, id, testcases);
-                
-                if (provider.webview) {
-                    provider.webview.postMessage({
-                        command: 'showTestCases',
+            }, async () => {
+                const { id, content, testcases } = await retrieveTestCases(slugTitle);
+
+                const casePath = await storeTestCases(rootDir, id, testcases);
+
+                if (viewProvider.activeWebview) {
+                    viewProvider.activeWebview.postMessage({
+                        command: 'displayTestCases',
                         testCases: testcases,
                         problemContent: content
                     });
                 }
 
-                // Store problem ID in workspace state
                 await context.workspaceState.update('currentProblemId', id);
-                vscode.window.showInformationMessage(
-                    `Test cases saved to ${testCasePath}`
+                vsEditor.window.showInformationMessage(
+                    `Test cases saved at ${casePath}`
                 );
             });
 
-        } catch (error) {
-            vscode.window.showErrorMessage(`Error: ${error.message}`);
+        } catch (err) {
+            vsEditor.window.showErrorMessage(`Error: ${err.message}`);
         }
     });
-    // Register run command
-    let runCommand = vscode.commands.registerCommand('leetcode-testcases.run', async () => {
+
+    let runCmd = vsEditor.commands.registerCommand('leetcode-cases.run', async () => {
         try {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                throw new Error('No active editor');
+            const activeEditor = vsEditor.window.activeTextEditor;
+            if (!activeEditor) {
+                throw new Error('No editor active');
             }
-            
-            const filePath = editor.document.uri.fsPath;
-            const ext = path.extname(filePath);
-            const language = ext.substring(1);
-            
-            await editor.document.save();
-            
+
+            const filePath = activeEditor.document.uri.fsPath;
+            const fileExt = filePath.extname(filePath);
+            const language = fileExt.substring(1);
+
+            await activeEditor.document.save();
+
             const problemId = context.workspaceState.get('currentProblemId');
             if (!problemId) {
-                throw new Error('No problem ID found. Please fetch test cases first.');
+                throw new Error('No problem loaded. Fetch test cases first.');
             }
-            
-            await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
+
+            await vsEditor.window.withProgress({
+                location: vsEditor.ProgressLocation.Notification,
                 title: "Running test cases...",
                 cancellable: false
-            }, async (progress) => {
-                const result = await executeCode(filePath, language, problemId);
-                
-                if (!result.success) {
-                    throw new Error(result.error);
+            }, async () => {
+                const executionResult = await runCode(filePath, language, problemId);
+
+                if (!executionResult.success) {
+                    throw new Error(executionResult.error);
                 }
-    
-                if (provider.webview) {
-                    provider.webview.postMessage({
-                        command: 'testResults',
-                        results: result.results,
-                        summary: result.summary
+
+                if (viewProvider.activeWebview) {
+                    viewProvider.activeWebview.postMessage({
+                        command: 'testRunResults',
+                        results: executionResult.results,
+                        summary: executionResult.summary
                     });
                 }
             });
-            
-        } catch (error) {
-            vscode.window.showErrorMessage(`Error: ${error.message}`);
+
+        } catch (err) {
+            vsEditor.window.showErrorMessage(`Error: ${err.message}`);
         }
     });
 
-    context.subscriptions.push(fetchCommand, runCommand);
-    console.log('Extension: Registered run command');
+    context.subscriptions.push(fetchCmd, runCmd);
+    console.log('Extension: Commands initialized');
 
-    console.log('CPH LeetCode Extension: Activation complete');
+    console.log('LeetCode Helper Extension: Fully activated');
 }
 
-function deactivate() {}
+function deactivatePlugin() {}
 
 module.exports = {
-    activate,
-    deactivate
+    activate: activatePlugin,
+    deactivate: deactivatePlugin
 };
