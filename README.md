@@ -6,18 +6,6 @@
 
 A VS Code extension that helps you test LeetCode problems directly in your development environment. Fetch test cases automatically and run them without leaving your editor.
 
-<img src="media/demo.gif" alt="CPH-Leetcode Demo" width="100%">
-
-## Features
-
-- 🔄 Automatically fetch test cases from LeetCode problems
-- ⚡ Run test cases directly in VS Code
-- 📝 Support for multiple programming languages
-- 🎯 Real-time test case validation
-- 💻 Local development environment integration
-
-
-
 ## Installation
 
 ### Method 1: VS Code Marketplace
@@ -59,16 +47,6 @@ npm run compile
 - VS Code 1.96.0 or higher
 - Node.js 22.10.0 or higher
 - Active internet connection for fetching test cases
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
 
 ## License
 
