@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="media/logo.png" alt="CPH-Leetcode Logo" height="45">
+  
   <h1 align="center">CPH-Leetcode</h1>
 </p>
 
@@ -16,10 +16,7 @@ A VS Code extension that helps you test LeetCode problems directly in your devel
 - 🎯 Real-time test case validation
 - 💻 Local development environment integration
 
-<p align="center">
-  <img src="./media/image-1.png" alt="CPH-Leetcode-1" width="400">&nbsp;&nbsp;
-  <img src="./media/image-2.png" alt="CPH-Leetcode-2" width="400">
-</p>
+
 
 ## Installation
 
